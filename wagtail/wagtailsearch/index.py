@@ -8,6 +8,7 @@ from django.core import checks
 from django.db import models
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.fields.related import ForeignObjectRel, OneToOneRel, RelatedField
+from django.utils import translation
 
 from wagtail.wagtailsearch.backends import get_search_backends_with_name
 
@@ -144,12 +145,17 @@ def insert_or_update_object(instance):
     indexed_instance = get_indexed_instance(instance)
 
     if indexed_instance:
+        cur_language = translation.get_language()
         for backend_name, backend in get_search_backends_with_name(with_auto_update=True):
+            backend_language = getattr(backend, 'language_code', None)
+            if backend_language is not None:
+                translation.activate(backend_language)
             try:
                 backend.add(indexed_instance)
             except Exception:
                 # Catch and log all errors
                 logger.exception("Exception raised while adding %r into the '%s' search backend", indexed_instance, backend_name)
+        translation.activate(cur_language)
 
 
 def remove_object(instance):
@@ -167,6 +173,7 @@ def remove_object(instance):
 class BaseField(object):
     def __init__(self, field_name, **kwargs):
         self.field_name = field_name
+        self.language = None
         self.kwargs = kwargs
 
     def get_field(self, cls):
@@ -217,10 +224,11 @@ class BaseField(object):
 
 
 class SearchField(BaseField):
-    def __init__(self, field_name, boost=None, partial_match=False, **kwargs):
+    def __init__(self, field_name, boost=None, partial_match=False, language=None, **kwargs):
         super(SearchField, self).__init__(field_name, **kwargs)
         self.boost = boost
         self.partial_match = partial_match
+        self.language = language
 
 
 class FilterField(BaseField):
@@ -231,6 +239,7 @@ class RelatedFields(object):
     def __init__(self, field_name, fields):
         self.field_name = field_name
         self.fields = fields
+        self.language = None
 
     def get_field(self, cls):
         return cls._meta.get_field(self.field_name)
