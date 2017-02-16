@@ -54,8 +54,9 @@ class ElasticsearchMapping(object):
         'index_analyzer': 'edgengram_analyzer',
     }
 
-    def __init__(self, model):
+    def __init__(self, model, language=None):
         self.model = model
+        self.language = language
 
     def get_parent(self):
         for base in self.model.__bases__:
@@ -77,7 +78,7 @@ class ElasticsearchMapping(object):
         if isinstance(field, RelatedFields):
             mapping = {'type': 'nested', 'properties': {}}
             nested_model = field.get_field(self.model).related_model
-            nested_mapping = type(self)(nested_model)
+            nested_mapping = type(self)(nested_model, language=self.language)
 
             for sub_field in field.fields:
                 sub_field_name, sub_field_mapping = nested_mapping.get_field_mapping(sub_field)
@@ -132,7 +133,7 @@ class ElasticsearchMapping(object):
             fields['content_type']['index'] = 'not_analyzed'
 
         fields.update(dict(
-            self.get_field_mapping(field) for field in self.model.get_search_fields()
+            self.get_field_mapping(field) for field in self.model.get_search_fields() if self.language is None or field.language is None or field.language == self.language
         ))
 
         return {
@@ -164,7 +165,7 @@ class ElasticsearchMapping(object):
         # Build document
         doc = dict(pk=str(obj.pk), content_type=self.model.indexed_get_content_type())
         partials = []
-        for field in self.model.get_search_fields():
+        for field in [field for field in self.model.get_search_fields() if self.language is None or field.language is None or field.language == self.language]:
             value = field.get_value(obj)
 
             if isinstance(field, RelatedFields):
@@ -527,7 +528,7 @@ class ElasticsearchIndex(object):
 
     def add_model(self, model):
         # Get mapping
-        mapping = self.mapping_class(model)
+        mapping = self.mapping_class(model, language=self.backend.language_code)
 
         # Put mapping
         self.es.indices.put_mapping(
@@ -540,7 +541,7 @@ class ElasticsearchIndex(object):
             return
 
         # Get mapping
-        mapping = self.mapping_class(item.__class__)
+        mapping = self.mapping_class(item.__class__, language=self.backend.language_code)
 
         # Add document to index
         self.es.index(
@@ -552,7 +553,7 @@ class ElasticsearchIndex(object):
             return
 
         # Get mapping
-        mapping = self.mapping_class(model)
+        mapping = self.mapping_class(model, language=self.backend.language_code)
         doc_type = mapping.get_document_type()
 
         # Create list of actions
@@ -576,7 +577,7 @@ class ElasticsearchIndex(object):
             return
 
         # Get mapping
-        mapping = self.mapping_class(item.__class__)
+        mapping = self.mapping_class(item.__class__, language=self.backend.language_code)
 
         # Delete document
         try:
@@ -732,6 +733,7 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
         self.hosts = params.pop('HOSTS', None)
         self.index_name = params.pop('INDEX', 'wagtail')
         self.timeout = params.pop('TIMEOUT', 10)
+        self.language_code = params.pop('LANGUAGE_CODE', None)
 
         if params.pop('ATOMIC_REBUILD', False):
             self.rebuilder_class = self.atomic_rebuilder_class
