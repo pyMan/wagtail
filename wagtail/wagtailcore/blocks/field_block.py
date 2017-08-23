@@ -26,11 +26,12 @@ class FieldBlock(Block):
         return self.field.widget.id_for_label(prefix)
 
     def render_form(self, value, prefix='', errors=None):
-        widget = self.field.widget
+        field = self.field
+        widget = field.widget
 
         widget_attrs = {'id': prefix, 'placeholder': self.label}
 
-        field_value = self.value_for_form(value)
+        field_value = field.prepare_value(self.value_for_form(value))
 
         if hasattr(widget, 'render_with_errors'):
             widget_html = widget.render_with_errors(prefix, field_value, attrs=widget_attrs, errors=errors)
@@ -43,7 +44,7 @@ class FieldBlock(Block):
             'name': self.name,
             'classes': self.meta.classname,
             'widget': widget_html,
-            'field': self.field,
+            'field': field,
             'errors': errors if (not widget_has_rendered_errors) else None
         })
 
@@ -168,10 +169,11 @@ class FloatBlock(FieldBlock):
 
 class DecimalBlock(FieldBlock):
 
-    def __init__(self, required=True, max_value=None, min_value=None,
+    def __init__(self, required=True, help_text=None, max_value=None, min_value=None,
                  max_digits=None, decimal_places=None, *args, **kwargs):
         self.field = forms.DecimalField(
             required=required,
+            help_text=help_text,
             max_value=max_value,
             min_value=min_value,
             max_digits=max_digits,
@@ -185,11 +187,12 @@ class DecimalBlock(FieldBlock):
 
 class RegexBlock(FieldBlock):
 
-    def __init__(self, regex, required=True, max_length=None, min_length=None,
+    def __init__(self, regex, required=True, help_text=None, max_length=None, min_length=None,
                  error_messages=None, *args, **kwargs):
         self.field = forms.RegexField(
             regex=regex,
             required=required,
+            help_text=help_text,
             max_length=max_length,
             min_length=min_length,
             error_messages=error_messages,
@@ -231,14 +234,21 @@ class BooleanBlock(FieldBlock):
 
 class DateBlock(FieldBlock):
 
-    def __init__(self, required=True, help_text=None, **kwargs):
+    def __init__(self, required=True, help_text=None, format=None, **kwargs):
         self.field_options = {'required': required, 'help_text': help_text}
+        try:
+            self.field_options['input_formats'] = kwargs.pop('input_formats')
+        except KeyError:
+            pass
+        self.format = format
         super(DateBlock, self).__init__(**kwargs)
 
     @cached_property
     def field(self):
         from wagtail.wagtailadmin.widgets import AdminDateInput
-        field_kwargs = {'widget': AdminDateInput}
+        field_kwargs = {
+            'widget': AdminDateInput(format=self.format),
+        }
         field_kwargs.update(self.field_options)
         return forms.DateField(**field_kwargs)
 
@@ -280,14 +290,17 @@ class TimeBlock(FieldBlock):
 
 class DateTimeBlock(FieldBlock):
 
-    def __init__(self, required=True, help_text=None, **kwargs):
+    def __init__(self, required=True, help_text=None, format=None, **kwargs):
         self.field_options = {'required': required, 'help_text': help_text}
+        self.format = format
         super(DateTimeBlock, self).__init__(**kwargs)
 
     @cached_property
     def field(self):
         from wagtail.wagtailadmin.widgets import AdminDateTimeInput
-        field_kwargs = {'widget': AdminDateTimeInput}
+        field_kwargs = {
+            'widget': AdminDateTimeInput(format=self.format),
+        }
         field_kwargs.update(self.field_options)
         return forms.DateTimeField(**field_kwargs)
 
@@ -439,9 +452,10 @@ class ChoiceBlock(FieldBlock):
 
 class RichTextBlock(FieldBlock):
 
-    def __init__(self, required=True, help_text=None, editor='default', **kwargs):
+    def __init__(self, required=True, help_text=None, editor='default', features=None, **kwargs):
         self.field_options = {'required': required, 'help_text': help_text}
         self.editor = editor
+        self.features = features
         super(RichTextBlock, self).__init__(**kwargs)
 
     def get_default(self):
@@ -463,7 +477,10 @@ class RichTextBlock(FieldBlock):
     @cached_property
     def field(self):
         from wagtail.wagtailadmin.rich_text import get_rich_text_editor_widget
-        return forms.CharField(widget=get_rich_text_editor_widget(self.editor), **self.field_options)
+        return forms.CharField(
+            widget=get_rich_text_editor_widget(self.editor, features=self.features),
+            **self.field_options
+        )
 
     def value_for_form(self, value):
         # Rich text editors take the source-HTML string as input (and takes care
@@ -581,20 +598,48 @@ class ChooserBlock(FieldBlock):
 
 class PageChooserBlock(ChooserBlock):
 
-    def __init__(self, target_model='wagtailcore.Page', can_choose_root=False,
+    # TODO: rename target_model to page_type
+    def __init__(self, target_model=None, can_choose_root=False,
                  **kwargs):
-        self._target_model = target_model
+        if target_model:
+            # Convert single string/model into a list
+            if not isinstance(target_model, (list, tuple)):
+                target_model = [target_model]
+        else:
+            target_model = []
+
+        self._target_models = target_model
         self.can_choose_root = can_choose_root
         super(PageChooserBlock, self).__init__(**kwargs)
 
     @cached_property
     def target_model(self):
-        return resolve_model_string(self._target_model)
+        """
+        Defines the model used by the base ChooserBlock for ID <-> instance
+        conversions. If a single page type is specified in target_model,
+        we can use that to get the more specific instance "for free"; otherwise
+        use the generic Page model.
+        """
+        if len(self.target_models) == 1:
+            return self.target_models[0]
+
+        return resolve_model_string('wagtailcore.Page')
+
+    @cached_property
+    def target_models(self):
+        target_models = []
+
+        for target_model in self._target_models:
+            target_models.append(
+                resolve_model_string(target_model)
+            )
+
+        return target_models
 
     @cached_property
     def widget(self):
         from wagtail.wagtailadmin.widgets import AdminPageChooser
-        return AdminPageChooser(target_models=[self.target_model],
+        return AdminPageChooser(target_models=self.target_models,
                                 can_choose_root=self.can_choose_root)
 
     def render_basic(self, value, context=None):
@@ -605,9 +650,18 @@ class PageChooserBlock(ChooserBlock):
 
     def deconstruct(self):
         name, args, kwargs = super(PageChooserBlock, self).deconstruct()
+
         if 'target_model' in kwargs:
-            opts = self.target_model._meta
-            kwargs['target_model'] = '{}.{}'.format(opts.app_label, opts.object_name)
+            target_models = []
+
+            for target_model in self.target_models:
+                opts = target_model._meta
+                target_models.append(
+                    '{}.{}'.format(opts.app_label, opts.object_name)
+                )
+
+            kwargs['target_model'] = target_models
+
         return name, args, kwargs
 
     class Meta:

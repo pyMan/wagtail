@@ -761,8 +761,16 @@ class TestElasticsearch2Mapping(TestCase):
                     'published_date_filter': {'index': 'not_analyzed', 'type': 'date', 'include_in_all': False},
                     'title': {'type': 'string', 'include_in_all': True, 'analyzer': 'edgengram_analyzer', 'search_analyzer': 'standard'},
                     'title_filter': {'index': 'not_analyzed', 'type': 'string', 'include_in_all': False},
-                    'content': {'type': 'string', 'include_in_all': True},
+                    'content': {'type': 'string', 'boost': 2, 'include_in_all': True},
                     'callable_indexed_field': {'type': 'string', 'include_in_all': True},
+                    'subobjects': {
+                        'properties': {
+                            'name': {'analyzer': 'edgengram_analyzer',
+                                     'include_in_all': True,
+                                     'search_analyzer': 'standard',
+                                     'type': 'string'}},
+                        'type': 'nested',
+                    },
                     'tags': {
                         'type': 'nested',
                         'properties': {
@@ -798,6 +806,7 @@ class TestElasticsearch2Mapping(TestCase):
             'title_filter': 'Hello',
             'callable_indexed_field': 'Callable',
             'content': '',
+            'subobjects': [],
             'tags': [
                 {
                     'name': 'a tag',
@@ -856,8 +865,16 @@ class TestElasticsearch2MappingInheritance(TestCase):
                     'published_date_filter': {'index': 'not_analyzed', 'type': 'date', 'include_in_all': False},
                     'title': {'type': 'string', 'include_in_all': True, 'analyzer': 'edgengram_analyzer', 'search_analyzer': 'standard'},
                     'title_filter': {'index': 'not_analyzed', 'type': 'string', 'include_in_all': False},
-                    'content': {'type': 'string', 'include_in_all': True},
+                    'content': {'type': 'string', 'boost': 2, 'include_in_all': True},
                     'callable_indexed_field': {'type': 'string', 'include_in_all': True},
+                    'subobjects': {
+                        'properties': {
+                            'name': {'analyzer': 'edgengram_analyzer',
+                                     'include_in_all': True,
+                                     'search_analyzer': 'standard',
+                                     'type': 'string'}},
+                        'type': 'nested',
+                    },
                     'tags': {
                         'type': 'nested',
                         'properties': {
@@ -908,6 +925,7 @@ class TestElasticsearch2MappingInheritance(TestCase):
             'title_filter': 'Hello',
             'callable_indexed_field': 'Callable',
             'content': '',
+            'subobjects': [],
             'tags': [
                 {
                     'name': 'a tag',
