@@ -5,14 +5,13 @@ import os.path
 from collections import OrderedDict
 from contextlib import contextmanager
 
-import django
 from django.conf import settings
 from django.core import checks
 from django.core.files import File
-from django.core.urlresolvers import reverse
 from django.db import models
 from django.forms.utils import flatatt
-from django.utils.encoding import python_2_unicode_compatible
+
+from django.urls import reverse
 from django.utils.functional import cached_property
 from django.utils.safestring import mark_safe
 from django.utils.six import BytesIO, string_types, text_type
@@ -63,7 +62,6 @@ def get_rendition_upload_to(instance, filename):
     return instance.get_upload_to(filename)
 
 
-@python_2_unicode_compatible
 class AbstractImage(CollectionMember, index.Indexed, models.Model):
     title = models.CharField(max_length=255, verbose_name=_('title'))
     file = models.ImageField(
@@ -249,10 +247,7 @@ class AbstractImage(CollectionMember, index.Indexed, models.Model):
     @classmethod
     def get_rendition_model(cls):
         """ Get the Rendition model for this Image model """
-        if django.VERSION >= (1, 9):
-            return cls.renditions.rel.related_model
-        else:
-            return cls.renditions.related.related_model
+        return cls.renditions.rel.related_model
 
     def get_rendition(self, filter):
         if isinstance(filter, string_types):

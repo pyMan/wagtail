@@ -137,7 +137,7 @@ Hooks for building new areas of the admin interface (alongside pages, images, do
 
   .. code-block:: python
 
-    from django.core.urlresolvers import reverse
+    from django.urls import reverse
 
     from wagtail.wagtailcore import hooks
     from wagtail.wagtailadmin.menu import MenuItem
@@ -214,7 +214,7 @@ Hooks for building new areas of the admin interface (alongside pages, images, do
 
   .. code-block:: python
 
-    from django.core.urlresolvers import reverse
+    from django.urls import reverse
     from wagtail.wagtailcore import hooks
     from wagtail.wagtailadmin.search import SearchArea
 
@@ -348,7 +348,7 @@ Hooks for customising the editing interface for pages and snippets.
     @hooks.register('insert_editor_js')
     def editor_js():
         js_files = [
-            'demo/js/hallo-plugins/hallo-demo-plugin.js',
+            'demo/js/jquery.raptorize.1.0.js',
         ]
         js_includes = format_html_join('\n', '<script src="{0}{1}"></script>',
             ((settings.STATIC_URL, filename) for filename in js_files)
@@ -356,7 +356,9 @@ Hooks for customising the editing interface for pages and snippets.
         return js_includes + format_html(
             """
             <script>
-                registerHalloPlugin('demoeditor');
+                $(function() {
+                    $('button').raptorize();
+                });
             </script>
             """
         )
@@ -624,7 +626,7 @@ Page explorer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   Add buttons to the "More" dropdown menu for a page in the page explorer. This works similarly to the ``register_page_listing_buttons`` hook but is useful for lesser-used custom actions that are better suited for the dropdown.
-  
+
   This example will add a simple button to the dropdown menu:
 
   .. code-block:: python

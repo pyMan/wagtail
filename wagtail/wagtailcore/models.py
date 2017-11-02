@@ -3,7 +3,6 @@ from __future__ import absolute_import, unicode_literals
 import json
 import logging
 from collections import defaultdict
-from django import VERSION as DJANGO_VERSION
 
 from django.conf import settings
 from django.contrib.auth.models import Group, Permission
@@ -13,14 +12,14 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.handlers.base import BaseHandler
 from django.core.handlers.wsgi import WSGIRequest
-from django.core.urlresolvers import reverse
 from django.db import connection, models, transaction
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Concat, Substr
 from django.http import Http404
 from django.template.response import TemplateResponse
+from django.urls import reverse
 # Must be imported from Django so we get the new implementation of with_metaclass
 from django.utils import six, timezone
-from django.utils.encoding import python_2_unicode_compatible
 from django.utils.functional import cached_property
 from django.utils.six import StringIO
 from django.utils.six.moves.urllib.parse import urlparse
@@ -29,7 +28,6 @@ from django.utils.translation import ugettext_lazy as _
 from modelcluster.models import ClusterableModel, get_all_child_relations
 from treebeard.mp_tree import MP_Node
 
-from wagtail.utils.compat import user_is_authenticated
 from wagtail.wagtailcore.query import PageQuerySet, TreeQuerySet
 from wagtail.wagtailcore.signals import page_published, page_unpublished
 from wagtail.wagtailcore.sites import get_site_for_hostname
@@ -48,7 +46,6 @@ class SiteManager(models.Manager):
         return self.get(hostname=hostname, port=port)
 
 
-@python_2_unicode_compatible
 class Site(models.Model):
     hostname = models.CharField(verbose_name=_('hostname'), max_length=255, db_index=True)
     port = models.IntegerField(
@@ -194,7 +191,7 @@ def get_default_page_content_type():
 
 class BasePageManager(models.Manager):
     def get_queryset(self):
-        return PageQuerySet(self.model).order_by('path')
+        return self._queryset_class(self.model).order_by('path')
 
 
 PageManager = BasePageManager.from_queryset(PageQuerySet)
@@ -204,11 +201,6 @@ class PageBase(models.base.ModelBase):
     """Metaclass for Page"""
     def __init__(cls, name, bases, dct):
         super(PageBase, cls).__init__(name, bases, dct)
-
-        if DJANGO_VERSION < (1, 10) and getattr(cls, '_deferred', False):
-            # this is an internal class built for Django's deferred-attribute mechanism;
-            # don't proceed with all this page type registration stuff
-            return
 
         if 'template' not in dct:
             # Define a default template path derived from the app name and model name
@@ -243,7 +235,6 @@ class AbstractPage(MP_Node):
         abstract = True
 
 
-@python_2_unicode_compatible
 class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, ClusterableModel)):
     title = models.CharField(
         verbose_name=_('title'),
@@ -255,20 +246,12 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
         max_length=255,
         editable=False
     )
-    # use django 1.9+ SlugField with unicode support
-    if DJANGO_VERSION >= (1, 9):
-        slug = models.SlugField(
-            verbose_name=_('slug'),
-            allow_unicode=True,
-            max_length=255,
-            help_text=_("The name of the page as it will appear in URLs e.g http://domain.com/blog/[my-slug]/")
-        )
-    else:
-        slug = models.SlugField(
-            verbose_name=_('slug'),
-            max_length=255,
-            help_text=_("The name of the page as it will appear in URLs e.g http://domain.com/blog/[my-slug]/")
-        )
+    slug = models.SlugField(
+        verbose_name=_('slug'),
+        allow_unicode=True,
+        max_length=255,
+        help_text=_("The name of the page as it will appear in URLs e.g http://domain.com/blog/[my-slug]/")
+    )
     content_type = models.ForeignKey(
         'contenttypes.ContentType',
         verbose_name=_('content type'),
@@ -358,6 +341,7 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
         index.FilterField('locked'),
         index.FilterField('show_in_menus'),
         index.FilterField('first_published_at'),
+        index.FilterField('last_published_at'),
         index.FilterField('latest_revision_created_at'),
     ]
 
@@ -435,10 +419,7 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
 
         if not self.slug:
             # Try to auto-populate slug from title
-            if DJANGO_VERSION >= (1, 9):
-                base_slug = slugify(self.title, allow_unicode=True)
-            else:
-                base_slug = slugify(self.title)
+            base_slug = slugify(self.title, allow_unicode=True)
 
             # only proceed if we get a non-empty base slug back from slugify
             if base_slug:
@@ -529,7 +510,7 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
 
         for field in cls._meta.fields:
             if isinstance(field, models.ForeignKey) and field.name not in field_exceptions:
-                if field.rel.on_delete == models.CASCADE:
+                if field.remote_field.on_delete == models.CASCADE:
                     errors.append(
                         checks.Warning(
                             "Field hasn't specified on_delete action",
@@ -574,32 +555,20 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
         return errors
 
     def _update_descendant_url_paths(self, old_url_path, new_url_path):
-        cursor = connection.cursor()
-        if connection.vendor == 'sqlite':
-            update_statement = """
-                UPDATE wagtailcore_page
-                SET url_path = %s || substr(url_path, %s)
-                WHERE path LIKE %s AND id <> %s
-            """
-        elif connection.vendor == 'mysql':
-            update_statement = """
-                UPDATE wagtailcore_page
-                SET url_path= CONCAT(%s, substring(url_path, %s))
-                WHERE path LIKE %s AND id <> %s
-            """
-        elif connection.vendor in ('mssql', 'microsoft'):
-            update_statement = """
+        if connection.vendor in ('mssql', 'microsoft'):
+            cursor = connection.cursor()
+            cursor.execute("""
                 UPDATE wagtailcore_page
                 SET url_path= CONCAT(%s, (SUBSTRING(url_path, 0, %s)))
                 WHERE path LIKE %s AND id <> %s
-            """
+            """, [new_url_path, len(old_url_path) + 1, self.path + '%', self.id])
         else:
-            update_statement = """
-                UPDATE wagtailcore_page
-                SET url_path = %s || substring(url_path from %s)
-                WHERE path LIKE %s AND id <> %s
-            """
-        cursor.execute(update_statement, [new_url_path, len(old_url_path) + 1, self.path + '%', self.id])
+            (Page.objects
+                .filter(path__startswith=self.path)
+                .exclude(pk=self.pk)
+                .update(url_path=Concat(
+                    Value(new_url_path),
+                    Substr('url_path', len(old_url_path) + 1))))
 
     #: Return this page in its most specific subclassed form.
     @cached_property
@@ -661,7 +630,9 @@ class Page(six.with_metaclass(PageBase, AbstractPage, index.Indexed, Clusterable
         override this if you wish to display extra contextual information about the page,
         such as language. By default, returns ``draft_title``.
         """
-        return self.draft_title
+        # Fall back on title if draft_title is blank (which may happen if the page was created
+        # in a fixture or migration that didn't explicitly handle draft_title)
+        return self.draft_title or self.title
 
     def save_revision(self, user=None, submitted_for_moderation=False, approved_go_live_at=None, changed=True):
         self.full_clean()
@@ -1416,7 +1387,6 @@ class SubmittedRevisionsManager(models.Manager):
         return super(SubmittedRevisionsManager, self).get_queryset().filter(submitted_for_moderation=True)
 
 
-@python_2_unicode_compatible
 class PageRevision(models.Model):
     page = models.ForeignKey('Page', verbose_name=_('page'), related_name='revisions', on_delete=models.CASCADE)
     submitted_for_moderation = models.BooleanField(
@@ -1569,7 +1539,6 @@ PAGE_PERMISSION_TYPE_CHOICES = [
 ]
 
 
-@python_2_unicode_compatible
 class GroupPagePermission(models.Model):
     group = models.ForeignKey(Group, verbose_name=_('group'), related_name='page_permissions', on_delete=models.CASCADE)
     page = models.ForeignKey('Page', verbose_name=_('page'), related_name='group_permissions', on_delete=models.CASCADE)
@@ -1886,7 +1855,7 @@ class BaseViewRestriction(models.Model):
                 return False
 
         elif self.restriction_type == BaseViewRestriction.LOGIN:
-            if not user_is_authenticated(request.user):
+            if not request.user.is_authenticated:
                 return False
 
         elif self.restriction_type == BaseViewRestriction.GROUPS:
@@ -1954,7 +1923,6 @@ class CollectionViewRestriction(BaseViewRestriction):
         verbose_name_plural = _('collection view restrictions')
 
 
-@python_2_unicode_compatible
 class Collection(MP_Node):
     """
     A location in which resources such as images and documents can be grouped
@@ -2014,7 +1982,6 @@ class CollectionMember(models.Model):
         abstract = True
 
 
-@python_2_unicode_compatible
 class GroupCollectionPermission(models.Model):
     """
     A rule indicating that a group has permission for some action (e.g. "create document")

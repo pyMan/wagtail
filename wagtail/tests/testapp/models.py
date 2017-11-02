@@ -12,7 +12,6 @@ from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.shortcuts import render
-from django.utils.encoding import python_2_unicode_compatible
 from django.utils.six import text_type
 from modelcluster.contrib.taggit import ClusterTaggableManager
 from modelcluster.fields import ParentalKey, ParentalManyToManyField
@@ -28,8 +27,9 @@ from wagtail.wagtailadmin.forms import WagtailAdminPageForm
 from wagtail.wagtailadmin.utils import send_mail
 from wagtail.wagtailcore.blocks import CharBlock, RichTextBlock
 from wagtail.wagtailcore.fields import RichTextField, StreamField
-from wagtail.wagtailcore.models import Orderable, Page, PageManager
+from wagtail.wagtailcore.models import Orderable, Page, PageManager, PageQuerySet
 from wagtail.wagtaildocs.edit_handlers import DocumentChooserPanel
+from wagtail.wagtaildocs.models import AbstractDocument, Document
 from wagtail.wagtailforms.models import AbstractEmailForm, AbstractFormField, AbstractFormSubmission
 from wagtail.wagtailimages.blocks import ImageChooserBlock
 from wagtail.wagtailimages.edit_handlers import ImageChooserPanel
@@ -198,7 +198,6 @@ class EventPageSpeaker(Orderable, LinkFields):
     ]
 
 
-@python_2_unicode_compatible
 class EventCategory(models.Model):
     name = models.CharField("Name", max_length=255)
 
@@ -368,6 +367,11 @@ class EventIndex(Page):
             }
         ]
 
+    def get_cached_paths(self):
+        return super(EventIndex, self).get_cached_paths() + [
+            '/past/'
+        ]
+
 
 EventIndex.content_panels = [
     FieldPanel('title', classname="full title"),
@@ -513,7 +517,6 @@ class AdvertTag(TaggedItemBase):
     content_object = ParentalKey('Advert', related_name='tagged_items', on_delete=models.CASCADE)
 
 
-@python_2_unicode_compatible
 class Advert(ClusterableModel):
     url = models.URLField(null=True, blank=True)
     text = models.CharField(max_length=255)
@@ -533,7 +536,6 @@ class Advert(ClusterableModel):
 register_snippet(Advert)
 
 
-@python_2_unicode_compatible
 class AdvertWithTabbedInterface(models.Model):
     url = models.URLField(null=True, blank=True)
     text = models.CharField(max_length=255)
@@ -671,6 +673,10 @@ class CustomRendition(AbstractRendition):
         unique_together = (
             ('image', 'filter_spec', 'focal_point_key'),
         )
+
+
+class CustomDocument(AbstractDocument):
+    admin_form_fields = Document.admin_form_fields
 
 
 class StreamModel(models.Model):
@@ -841,8 +847,12 @@ class CustomImageFilePath(AbstractImage):
         return os.path.join(folder_name, checksum[:3], filename)
 
 
-class CustomManager(PageManager):
-    pass
+class CustomPageQuerySet(PageQuerySet):
+    def about_spam(self):
+        return self.filter(title__contains='spam')
+
+
+CustomManager = PageManager.from_queryset(CustomPageQuerySet)
 
 
 class CustomManagerPage(Page):

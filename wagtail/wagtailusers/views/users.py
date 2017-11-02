@@ -3,9 +3,9 @@ from __future__ import absolute_import, unicode_literals
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ImproperlyConfigured
-from django.core.urlresolvers import reverse
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.module_loading import import_string
 from django.utils.translation import ugettext as _
 from django.views.decorators.vary import vary_on_headers
@@ -70,17 +70,18 @@ def index(request):
             is_searching = True
             conditions = Q()
 
-            if 'username' in model_fields:
-                conditions |= Q(username__icontains=q)
+            for term in q.split():
+                if 'username' in model_fields:
+                    conditions |= Q(username__icontains=term)
 
-            if 'first_name' in model_fields:
-                conditions |= Q(first_name__icontains=q)
+                if 'first_name' in model_fields:
+                    conditions |= Q(first_name__icontains=term)
 
-            if 'last_name' in model_fields:
-                conditions |= Q(last_name__icontains=q)
+                if 'last_name' in model_fields:
+                    conditions |= Q(last_name__icontains=term)
 
-            if 'email' in model_fields:
-                conditions |= Q(email__icontains=q)
+                if 'email' in model_fields:
+                    conditions |= Q(email__icontains=term)
 
             users = User.objects.filter(conditions)
     else:

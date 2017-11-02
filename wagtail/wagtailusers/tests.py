@@ -5,8 +5,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.urlresolvers import reverse
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import six
 
 from wagtail.tests.utils import WagtailTestUtils
@@ -17,7 +17,6 @@ from wagtail.wagtailcore.models import (
 from wagtail.wagtailusers.forms import UserCreationForm, UserEditForm
 from wagtail.wagtailusers.models import UserProfile
 from wagtail.wagtailusers.views.users import get_user_creation_form, get_user_edit_form
-
 
 delete_user_perm_codename = "delete_{0}".format(AUTH_USER_MODEL_NAME.lower())
 change_user_perm_codename = "change_{0}".format(AUTH_USER_MODEL_NAME.lower())
@@ -76,7 +75,9 @@ class TestUserIndexView(TestCase, WagtailTestUtils):
         self.test_user = get_user_model().objects.create_user(
             username='testuser',
             email='testuser@email.com',
-            password='password'
+            password='password',
+            first_name='First Name',
+            last_name='Last Name'
         )
         self.login()
 
@@ -101,6 +102,18 @@ class TestUserIndexView(TestCase, WagtailTestUtils):
         response = self.get({'q': "Hello"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['query_string'], "Hello")
+
+    def test_search_query_one_field(self):
+        response = self.get({'q': "first name"})
+        self.assertEqual(response.status_code, 200)
+        results = response.context['users'].object_list
+        self.assertIn(self.test_user, results)
+
+    def test_search_query_multiple_fields(self):
+        response = self.get({'q': "first name last name"})
+        self.assertEqual(response.status_code, 200)
+        results = response.context['users'].object_list
+        self.assertIn(self.test_user, results)
 
     def test_pagination(self):
         pages = ['0', '1', '-1', '9999', 'Not a page']
@@ -780,13 +793,7 @@ class TestGroupIndexView(TestCase, WagtailTestUtils):
     def test_search(self):
         response = self.get({'q': "Hello"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context['query_string'], "Hello")
-
-    def test_pagination(self):
-        pages = ['0', '1', '-1', '9999', 'Not a page']
-        for page in pages:
-            response = self.get({'p': page})
-            self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['search_form']['q'].value(), "Hello")
 
 
 class TestGroupCreateView(TestCase, WagtailTestUtils):
