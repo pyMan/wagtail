@@ -55,7 +55,7 @@ Add a new item into the ``WAGTAILFRONTENDCACHE`` setting and set the ``BACKEND``
 	WAGTAILFRONTENDCACHE_LANGUAGES = []
 
 
-Set ``WAGTAILFRONTENDCACHE_LANGUAGES`` to a list of languages (tipically equal to ``[l[0] for l in settings.LANGUAGES]``) to also purge the urls for each language of a purging url. This setting needs ``settings.USE_I18N`` to be ``True`` to work. Its default is an empty list.
+Set ``WAGTAILFRONTENDCACHE_LANGUAGES`` to a list of languages (typically equal to ``[l[0] for l in settings.LANGUAGES]``) to also purge the urls for each language of a purging url. This setting needs ``settings.USE_I18N`` to be ``True`` to work. Its default is an empty list.
 
 Finally, make sure you have configured your frontend cache to accept PURGE requests:
 
