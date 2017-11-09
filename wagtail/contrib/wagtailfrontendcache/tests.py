@@ -220,7 +220,7 @@ class TestCachePurgingSignals(TestCase):
         page = EventIndex.objects.get(url_path='/home/events/')
         page.save_revision().publish()
         self.assertEqual(len(PURGED_URLS), len(settings.WAGTAILFRONTENDCACHE_LANGUAGES) * 2)
-        for isocode, description in settings.WAGTAILFRONTENDCACHE_LANGUAGES:
+        for isocode in settings.WAGTAILFRONTENDCACHE_LANGUAGES:
             self.assertIn('http://localhost/%s/events/' % isocode, PURGED_URLS)
 
 
