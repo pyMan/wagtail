@@ -62,12 +62,16 @@ def purge_url_from_cache(url, backend_settings=None, backends=None):
 
 
 def purge_urls_from_cache(urls, backend_settings=None, backends=None):
-    if settings.USE_I18N:
-        langs_regex = "^/(%s)/" % "|".join([l[0] for l in settings.LANGUAGES])
+    # Convert each url to urls one for each managed language (WAGTAILFRONTENDCACHE_LANGUAGES setting).
+    # The managed languages are common to all the defined backends.
+    # This depends on settings.USE_I18N
+    languages = getattr(settings, 'WAGTAILFRONTENDCACHE_LANGUAGES', [])
+    if settings.USE_I18N and languages:
+        langs_regex = "^/(%s)/" % "|".join(languages)
         new_urls = []
 
         # Purge the given url for each managed language
-        for isocode, description in settings.LANGUAGES:
+        for isocode, description in languages:
             for url in urls:
                 up = urlparse(url)
                 new_url = urlunparse((
